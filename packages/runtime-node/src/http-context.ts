@@ -9,6 +9,7 @@ import {
   Constructable,
   IFactory,
 } from '@aurelia/kernel';
+import { Http2ServerResponse, Http2ServerRequest } from 'http2';
 
 export const enum HttpContextState {
   head = 1,
@@ -18,8 +19,8 @@ export const enum HttpContextState {
 
 export interface IHttpContext extends IContainer {
   state: HttpContextState;
-  readonly request: http.IncomingMessage;
-  readonly response: http.ServerResponse;
+  readonly request: http.IncomingMessage | Http2ServerRequest;
+  readonly response: http.ServerResponse | Http2ServerResponse;
   readonly requestBuffer: Buffer;
 }
 
@@ -30,8 +31,8 @@ export class HttpContext implements IHttpContext {
 
   public constructor(
     container: IContainer,
-    public readonly request: http.IncomingMessage,
-    public readonly response: http.ServerResponse,
+    public readonly request: http.IncomingMessage | Http2ServerRequest,
+    public readonly response: http.ServerResponse | Http2ServerResponse,
     public readonly requestBuffer: Buffer,
   ) {
     this.container = container.createChild();

@@ -11,6 +11,10 @@ import {
   realpathSync,
   statSync,
   writeFileSync,
+  open,
+  openSync,
+  close,
+  closeSync,
 } from 'fs';
 import {
   dirname,
@@ -580,6 +584,28 @@ export class NodeFileSystem implements IFileSystem {
       this.readFileSync(path, Encoding.utf8, true);
     }
     return file;
+  }
+
+  public open(
+    path: string,
+    flags: string | number,
+    modeOrCallback: string | number | undefined | null | ((err: NodeJS.ErrnoException | null, fd: number) => void),
+    callback: (err: NodeJS.ErrnoException | null, fd: number) => void): void {
+    return typeof modeOrCallback === 'function'
+      ? open(path, flags, modeOrCallback)
+      : open(path, flags, modeOrCallback, callback);
+  }
+
+  public openSync(path: string, flags: string | number, mode?: string | number | undefined | null): number {
+    return openSync(path, flags, mode);
+  }
+
+  public close(fd: number, callback: (err: NodeJS.ErrnoException | null) => void): void {
+    close(fd, callback);
+  }
+
+  public closeSync(fd: number): void {
+    closeSync(fd);
   }
 }
 

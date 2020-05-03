@@ -1,30 +1,8 @@
-import { ServiceHost } from '@aurelia/aot';
-import { IHttpServerOptions, IFileSystem, Encoding, RuntimeNodeConfiguration, IRequestHandler, FileServer, normalizePath, IHttpServer } from '@aurelia/runtime-node';
-import { ILogger, IContainer, LogLevel, Registration, Char, DI } from '@aurelia/kernel';
-import { join } from 'path';
-import { ChromeBrowser } from './browser/chrome';
-import { BrowserHost } from './browser/host';
+import { Char, DI, IContainer } from '@aurelia/kernel';
+import { IHttpServerOptions } from '@aurelia/runtime-node';
+import { DevServer, getLogLevel, IDevServerConfig } from './dev-server';
 
-export interface ITestRunnerConfig {
-  readonly entryFile: string;
-  readonly scratchDir: string;
-  readonly wipeScratchDir?: boolean;
-  readonly logLevel?: 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'none';
-}
-
-function getLogLevel(str: ITestRunnerConfig['logLevel']): LogLevel {
-  switch (str) {
-    case 'trace': return LogLevel.trace;
-    case 'debug': return LogLevel.debug;
-    case 'info': return LogLevel.info;
-    case 'warn': return LogLevel.warn;
-    case 'error': return LogLevel.error;
-    case 'fatal': return LogLevel.fatal;
-    case 'none': return LogLevel.none;
-  }
-  return LogLevel.info;
-}
-
+// TODO: remove this as not used. It seems that it is moved to AOT.
 export function computeRelativeDirectory(source: string, target: string): string {
   let prevSlashIndex = 0;
   let slashCount = 0;
@@ -52,74 +30,27 @@ export function computeRelativeDirectory(source: string, target: string): string
   return `${prefix}${target.slice(prevSlashIndex + 1)}`;
 }
 
-export class TestRunner {
+export class TestRunner extends DevServer {
   public constructor(
     @IContainer
-    private readonly container: IContainer,
-  ) {}
+    container: IContainer,
+  ) {
+    super(container);
+  }
 
   public static create(container = DI.createContainer()): TestRunner {
     return new TestRunner(container);
   }
 
-  public async runOnce({
-    entryFile,
-    scratchDir,
-    wipeScratchDir,
-    logLevel,
-  }: ITestRunnerConfig): Promise<void> {
-    entryFile = normalizePath(entryFile);
-    scratchDir = normalizePath(scratchDir);
+  public async runOnce(config: IDevServerConfig): Promise<void> {
+    await this.run(config);
+  }
 
-    // wireup
-    const container = this.container.createChild();
-    container.register(
-      RuntimeNodeConfiguration.create({
-        port: 0,
-        level: getLogLevel(logLevel),
-        root: scratchDir,
-      }),
-      Registration.singleton(IRequestHandler, FileServer),
-    );
-
-    const fs = container.get(IFileSystem);
-    const serviceHost = container.get(ServiceHost);
-
-    const logger = container.get(ILogger);
-    logger.info(`Starting test runner with scratchDir ${scratchDir} and entryFile ${entryFile}`);
-
-    // compile/bundle
-    const result = await serviceHost.execute({ entries: [{ file: entryFile }] });
-    if (await fs.isReadable(scratchDir) && wipeScratchDir) {
-      await fs.rimraf(scratchDir);
-    }
-    await result.ws.emit({ outDir: scratchDir });
-
-    // start the http/file/websocket server
-    const server = container.get(IHttpServer);
-    const { realPort } = await server.start();
-
-    // generate html file to run
-    const outFile = join(scratchDir, 'index.html');
-
-    const html = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-      </head>
-      <body>
-        <script type="module">
-          import '.${entryFile.replace(result.ws.lastCommonRootDir, '').replace(/\.ts$/, '.js')}';
-        </script>
-      </body>
-    </html>
-    `;
-
-    await fs.writeFile(outFile, html, Encoding.utf8);
-
-    // navigate to the html file
-    const browser = container.get(ChromeBrowser);
-    const browserHost = container.get(BrowserHost);
-    await browserHost.open(browser, `http://localhost:${realPort}/index.html`);
+  protected getNodeConfigurationOptions(logLevel: IDevServerConfig['logLevel'], scratchDir: string): Partial<IHttpServerOptions> {
+    return {
+      port: 0,
+      level: getLogLevel(logLevel),
+      root: scratchDir,
+    };
   }
 }

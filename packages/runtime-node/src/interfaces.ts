@@ -19,6 +19,7 @@ export const enum FileKind {
   JSON    = 4,
 }
 
+// Better to use the fs.Stats?
 export interface IStats {
   isFile(): boolean;
   isDirectory(): boolean;
@@ -26,6 +27,8 @@ export interface IStats {
   readonly mode: number;
   readonly uid: number;
   readonly gid: number;
+  readonly size: number;
+  readonly mtime: Date;
 }
 
 export interface IDirent {
@@ -96,6 +99,12 @@ export interface IFileSystem {
 
   getFile(path: string, loadContent?: boolean): Promise<IFile>;
   getFileSync(path: string, loadContent?: boolean): IFile;
+
+  open(path: string, flags: string | number, modeOrCallback: string | number | undefined | null | ((err: NodeJS.ErrnoException | null, fd: number) => void), callback: (err: NodeJS.ErrnoException | null, fd: number) => void): void;
+  openSync(path: string, flags: string | number, mode?: string | number | undefined | null): number;
+
+  close(fd: number, callback: (err: NodeJS.ErrnoException | null) => void): void;
+  closeSync(fd: number): void;
 }
 
 export type IProcessEnv = NodeJS.ProcessEnv;
@@ -115,6 +124,7 @@ export interface IHttpServerOptions {
   readonly port: number;
   readonly hostName: string;
   readonly level: LogLevel;
+  readonly useHttp2: boolean;
 }
 
 export class StartOutput {

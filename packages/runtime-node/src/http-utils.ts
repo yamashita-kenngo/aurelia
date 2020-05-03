@@ -1,4 +1,5 @@
 import * as http from 'http';
+import { Http2ServerRequest } from 'http2';
 
 export const enum HTTPStatusCode {
   SwitchingProtocols = 101,
@@ -40,7 +41,7 @@ export class HTTPError extends Error {
   }
 }
 
-export async function readBuffer(req: http.IncomingMessage): Promise<Buffer> {
+export async function readBuffer(req: http.IncomingMessage | Http2ServerRequest): Promise<Buffer> {
   let totalLength: number = 0;
   const chunks: Buffer[] = [];
 

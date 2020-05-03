@@ -1,13 +1,22 @@
 import { DebugConfiguration } from '@aurelia/debug';
 import { resolve } from 'path';
 import { TestRunner } from './test-runner';
+import { IDevServerConfig, DevServer } from "./dev-server";
+
+interface TestCommandArgs extends IDevServerConfig {
+  cmd: 'test';
+}
+interface DevCommandArgs extends IDevServerConfig {
+  cmd: 'dev';
+}
+type ParsedArgs = TestCommandArgs | DevCommandArgs;
 
 const keyMap = {
   entryfile: 'entryFile',
   scratchdir: 'scratchDir',
 } as const;
 
-function parseArgs(args: readonly string[]) {
+function parseArgs(args: readonly string[]): ParsedArgs {
   const cmd = args[0];
   args = args.slice(1);
 
@@ -16,8 +25,10 @@ function parseArgs(args: readonly string[]) {
   }
 
   switch (cmd) {
+    case 'dev':
     case 'test': {
       const parsed = {
+        cmd,
         entryFile: '',
         scratchDir: '',
       };
@@ -49,8 +60,18 @@ function parseArgs(args: readonly string[]) {
   DebugConfiguration.register();
 
   const args = parseArgs(process.argv.slice(2));
-  const runner = TestRunner.create();
-  await runner.runOnce(args);
+  switch (args.cmd) {
+    case 'test': {
+      const runner = TestRunner.create();
+      await runner.runOnce(args);
+      break;
+    }
+    case 'dev': {
+      const server = DevServer.create();
+      await server.run(args);
+      break;
+    }
+  }
 
 })().catch(err => {
   console.error(err);
