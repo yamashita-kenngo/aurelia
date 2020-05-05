@@ -108,6 +108,34 @@
         "<node_internals>/**",
         "**/esm.js"
       ]
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Run dev-server",
+      "cwd": "${workspaceFolder}\\examples\\vanilla-ts",
+      "program": "${workspaceFolder}\\packages\\au\\dist\\esnext\\index.js",
+      "runtimeArgs": [
+        "-r",
+        "esm"
+      ],
+      "args": [
+        "dev",
+        "--entryfile",
+        "${workspaceFolder}\\examples\\vanilla-ts\\src\\startup.ts",
+        "--scratchdir",
+        "${workspaceFolder}\\examples\\vanilla-ts\\dist",
+        "--usehttp2",
+        "true",
+        "--keypath",
+        "${workspaceFolder}\\examples\\vanilla-ts\\key.pem",
+        "--certpath",
+        "${workspaceFolder}\\examples\\vanilla-ts\\cert.pem",
+      ],
+      "skipFiles": [
+        "<node_internals>/**",
+        "**/esm.js"
+      ]
     }
   ]
 }

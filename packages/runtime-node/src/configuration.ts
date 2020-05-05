@@ -1,5 +1,5 @@
 import { Registration, IContainer, LogLevel, LoggerConfiguration, ColorOptions } from '@aurelia/kernel';
-import { IFileSystem, IHttpServer, IHttpServerOptions, ISystem, IRequestHandler } from './interfaces';
+import { IFileSystem, IHttpServer, IHttpServerOptions, ISystem, IRequestHandler, IHttp2FileServer } from './interfaces';
 import { NodeFileSystem } from './file-system';
 import { HttpServer, Http2Server } from './http-server';
 import { System } from './system';
@@ -22,19 +22,15 @@ export const RuntimeNodeConfiguration = {
           Registration.singleton(IFileSystem, NodeFileSystem),
           Registration.singleton(ISystem, System),
           Registration.instance(IHttpServerOptions, opts),
+          Registration.singleton(IRequestHandler, FileServer),
+          Registration.singleton(IHttp2FileServer, Http2FileServer),
           LoggerConfiguration.create(console, opts.level, ColorOptions.colors)
         );
 
         if (opts.useHttp2) {
-          container.register(
-            Registration.singleton(IHttpServer, Http2Server),
-            Registration.singleton(IRequestHandler, Http2FileServer)
-          );
+          container.register(Registration.singleton(IHttpServer, Http2Server));
         } else {
-          container.register(
-            Registration.singleton(IHttpServer, HttpServer),
-            Registration.singleton(IRequestHandler, FileServer)
-          );
+          container.register(Registration.singleton(IHttpServer, HttpServer));
         }
 
         return container;

@@ -10,6 +10,9 @@ export interface IDevServerConfig {
   readonly scratchDir: string;
   readonly wipeScratchDir?: boolean;
   readonly logLevel?: 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'none';
+  readonly useHttp2: boolean;
+  readonly keyPath?: string;
+  readonly certPath?: string;
 }
 
 export function getLogLevel(str: IDevServerConfig['logLevel']): LogLevel {
@@ -40,6 +43,9 @@ export class DevServer {
     scratchDir,
     wipeScratchDir,
     logLevel,
+    keyPath,
+    certPath,
+    useHttp2
   }: IDevServerConfig): Promise<void> {
 
     entryFile = normalizePath(entryFile);
@@ -47,7 +53,7 @@ export class DevServer {
 
     // wireup
     const container = this.container.createChild();
-    container.register(RuntimeNodeConfiguration.create(this.getNodeConfigurationOptions(logLevel, scratchDir)));
+    container.register(RuntimeNodeConfiguration.create(this.getNodeConfigurationOptions(logLevel, scratchDir, useHttp2, keyPath, certPath)));
     const fs = container.get(IFileSystem);
     const serviceHost = container.get(ServiceHost);
     const logger = container.get(ILogger);
@@ -84,15 +90,28 @@ export class DevServer {
     // navigate to the html file
     const browser = container.get(ChromeBrowser);
     const browserHost = container.get(BrowserHost);
-    await browserHost.open(browser, `http://localhost:${realPort}/index.html`);
+    const protocol = useHttp2 ? 'https' : 'http';
+    await browserHost.open(browser, `${protocol}://localhost:${realPort}/index.html`);
   }
 
-  protected getNodeConfigurationOptions(logLevel: IDevServerConfig['logLevel'], scratchDir: string): Partial<IHttpServerOptions> {
+  protected getNodeConfigurationOptions(
+    logLevel: IDevServerConfig['logLevel'],
+    scratchDir: string,
+    useHttp2: boolean,
+    keyPath?: string,
+    certPath?: string,
+  ): Partial<IHttpServerOptions> {
+    if (useHttp2 && !(keyPath && certPath)) {
+      throw new Error(`keyPath and certPath are required for a HTTP/2 server`);
+    }
+
     return {
-      // port: 3000,
+      port: useHttp2 ? 443 : 0,
       level: getLogLevel(logLevel),
       root: scratchDir,
-      useHttp2: true,
+      useHttp2,
+      keyPath: keyPath ? normalizePath(keyPath) : void 0,
+      certPath: certPath ? normalizePath(certPath) : void 0,
     };
   }
 }

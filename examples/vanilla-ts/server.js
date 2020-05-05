@@ -1,0 +1,121 @@
+// @ts-check
+const { createSecureServer, constants } = require("http2");
+const { readFileSync, existsSync, statSync, openSync, readdirSync, closeSync } = require("fs");
+const url = require("url");
+const { join, resolve, relative } = require("path");
+const {
+  HTTP2_HEADER_CONTENT_LENGTH,
+  HTTP2_HEADER_LAST_MODIFIED,
+  HTTP2_HEADER_CONTENT_TYPE,
+  HTTP2_HEADER_PATH,
+} = constants;
+
+const root = join(process.cwd(), "public");
+
+/**
+ * @param {string | string[]} path
+ */
+function getContentType(path) {
+  const i = path.lastIndexOf('.');
+  if (i >= 0) {
+    switch (path.slice(i)) {
+      case '.js': return 'application/javascript; charset=utf-8';
+      case '.html': return 'text/html; charset=utf-8';
+    }
+  }
+}
+
+/**
+ * @param {import("http2").Http2ServerRequest} request
+ * @param {import("http2").Http2ServerResponse} response
+ */
+function requestHandler(request, response) {
+  const parsedUrl = url.parse(request.url);
+  const parsedPath = parsedUrl.path;
+  console.log(`parsedPath: ${parsedPath}`);
+  const path = join(root, parsedPath);
+
+  if (existsSync(path) && statSync(path).isFile()) {
+    console.log(`Serving file "${path}"`);
+
+    const stream = response.stream;
+    if (parsedPath === '/index.html') {
+      console.log('pushingAll')
+      pushAll(stream);
+      // push(stream, "examples/vanilla-ts/src/startup.js")
+    }
+
+    const { fd, headers } = getFile(path);
+    stream.respondWithFD(fd, headers);
+    // stream.on('end', () => { closeSync(fd); });
+
+  } else {
+    console.log(`file "${path}" not found`);
+    response.writeHead(400);
+    response.end();
+  }
+}
+
+/**
+ * @param {string} path
+ */
+function getFile(path) {
+  const fd = openSync(path, 'r');
+  const contentType = getContentType(path);
+  const stat = statSync(path);
+  const headers = {
+    [HTTP2_HEADER_CONTENT_LENGTH]: stat.size,
+    [HTTP2_HEADER_LAST_MODIFIED]: stat.mtime.toUTCString(),
+    [HTTP2_HEADER_CONTENT_TYPE]: contentType
+  };
+  return { fd, headers };
+}
+
+
+/**
+ * @param {import("http2").ServerHttp2Stream} stream
+ * @param {string} [$root=root]
+ */
+function pushAll(stream, $root = root) {
+  // console.log('readdirSync', readdirSync($root));
+  for (const item of readdirSync($root)) {
+    const path = join($root, item);
+    const stats = statSync(path);
+    if (!path.endsWith('index.html')) {
+      // console.log("1");
+      if (stats.isFile()) {
+        // console.log("2");
+        push(stream, path);
+      } else {
+        // console.log("3");
+        pushAll(stream, path);
+      }
+    }
+  }
+}
+
+/**
+ * @param {import("http2").ServerHttp2Stream} stream
+ * @param {string} filePath
+ */
+function push(stream, filePath) {
+  const { fd, headers } = getFile(filePath);
+  const pushHeaders = { [HTTP2_HEADER_PATH]: relative(root, filePath) };
+
+  console.log(`preparing for pushing ${filePath}`);
+  stream.pushStream(pushHeaders, (_err, pushStream) => {
+    console.log(`pushing ${filePath}`);
+    pushStream.respondWithFD(fd, headers);
+    // pushStream.on('end', () => { closeSync(fd); });
+  });
+}
+
+const server = createSecureServer(
+  {
+    key: readFileSync("key.pem"),
+    cert: readFileSync("cert.pem")
+  },
+  requestHandler
+).listen(443, () => {
+  console.log("server is running");
+});

@@ -11,9 +11,13 @@ interface DevCommandArgs extends IDevServerConfig {
 }
 type ParsedArgs = TestCommandArgs | DevCommandArgs;
 
+// TODO gather this from config file from user-space
 const keyMap = {
   entryfile: 'entryFile',
   scratchdir: 'scratchDir',
+  usehttp2: 'useHttp2',
+  keypath: 'keyPath',
+  certpath: 'certPath',
 } as const;
 
 function parseArgs(args: readonly string[]): ParsedArgs {
@@ -31,6 +35,9 @@ function parseArgs(args: readonly string[]): ParsedArgs {
         cmd,
         entryFile: '',
         scratchDir: '',
+        keyPath: '',
+        certPath: '',
+        useHttp2: false
       };
       for (let i = 0, ii = args.length; i < ii; i += 2) {
         let key = args[i].trim().replace(/-/g, '').toLowerCase();
@@ -45,6 +52,15 @@ function parseArgs(args: readonly string[]): ParsedArgs {
             break;
           case 'scratchDir':
             parsed.scratchDir = resolve(process.cwd(), args[i + 1]);
+            break;
+          case 'keyPath':
+            parsed.keyPath = resolve(process.cwd(), args[i + 1]);
+            break;
+          case 'certPath':
+            parsed.certPath = resolve(process.cwd(), args[i + 1]);
+            break;
+          case 'useHttp2':
+            parsed.useHttp2 = args[i + 1] === 'true';
             break;
         }
       }

@@ -1,13 +1,21 @@
 import { IncomingMessage, ServerResponse } from "http";
 import * as url from 'url';
-import { join, resolve } from 'path';
+import { join, resolve, relative } from 'path';
 
 import { ILogger } from '@aurelia/kernel';
 
-import { IRequestHandler, IHttpServerOptions, IFileSystem, Encoding } from '../interfaces';
+import { IRequestHandler, IHttpServerOptions, IFileSystem, Encoding, IHttp2FileServer } from '../interfaces';
 import { IHttpContext, HttpContextState } from '../http-context';
 import { getContentType, HTTPStatusCode } from '../http-utils';
-import { Http2ServerRequest, Http2ServerResponse, ServerHttp2Stream, constants } from 'http2';
+import { ServerHttp2Stream, constants, IncomingHttpHeaders, Http2ServerRequest, Http2ServerResponse } from 'http2';
+
+const {
+  HTTP2_HEADER_PATH,
+  HTTP2_HEADER_STATUS,
+  HTTP2_HEADER_CONTENT_LENGTH,
+  HTTP2_HEADER_LAST_MODIFIED,
+  HTTP2_HEADER_CONTENT_TYPE,
+} = constants;
 
 export class FileServer implements IRequestHandler {
   private readonly root: string;
@@ -67,7 +75,7 @@ export class FileServer implements IRequestHandler {
 /**
  * File server with HTTP/2 push support
  */
-export class Http2FileServer implements IRequestHandler {
+export class Http2FileServer implements IHttp2FileServer {
   private readonly root: string;
 
   public constructor(
@@ -85,7 +93,7 @@ export class Http2FileServer implements IRequestHandler {
     this.logger.debug(`Now serving files from: "${this.root}"`);
   }
 
-  public async handleRequest(context: IHttpContext): Promise<void> {
+  public handleRequest(context: IHttpContext): void {
     const request = context.request;
     const response = context.response;
 
@@ -94,30 +102,61 @@ export class Http2FileServer implements IRequestHandler {
     const parsedPath = parsedUrl.path!;
     const path = join(this.root, parsedPath);
 
-    if (await this.fs.isReadable(path)) {
+    if (this.fs.isReadableSync(path)) {
       this.logger.debug(`Serving file "${path}"`);
 
       const stream = response.stream;
-      const { fd, headers } = this.getFile(path);
-      stream.on('close', () => this.fs.closeSync(fd));
-      stream.respondWithFD(fd, headers);
-
       // make this configurable
       if (parsedPath === '/index.html') {
         this.pushAll(stream);
       }
 
+      const { fd, headers } = this.getFile(path);
+      // stream.on('close', () => this.fs.closeSync(fd));
+      stream.respondWithFD(fd, headers);
+
     } else {
       this.logger.debug(`File "${path}" could not be found`);
 
       response.writeHead(HTTPStatusCode.NotFound);
-
-      await new Promise(function (resolve) {
-        response.end(resolve);
-      });
+      response.end();
     }
 
     context.state = HttpContextState.end;
+  }
+
+  public handleStream(stream: ServerHttp2Stream, headers: IncomingHttpHeaders, flags: number): void {
+    this.logger.info('Http2FileServer#handleRequest');
+
+    const parsedUrl = url.parse(headers[HTTP2_HEADER_PATH] as string);
+    const parsedPath = parsedUrl.path!;
+    const path = join(this.root, parsedPath);
+
+    if (this.fs.isReadableSync(path)) {
+      this.logger.debug(`Serving file "${path}"`);
+
+      // make this configurable
+      if (parsedPath === '/index.html') {
+        // this.pushAll(stream);
+        // TODO fix this
+        this.push(stream, '/examples/vanilla-ts/src/startup.js');
+        this.push(stream, '/examples/vanilla-ts/src/app.js');
+      }
+
+      const fileInfo = this.getFile(path);
+      const fd = fileInfo.fd;
+      stream.respondWithFD(fd, fileInfo.headers);
+      // stream.on('close', () => this.fs.closeSync(fd));
+      // stream.respondWithFile(path);
+      // stream.respond(fileInfo.headers);
+      // stream.write(this.fs.readFileSync(path, Encoding.utf8));
+
+    } else {
+      this.logger.debug(`File "${path}" could not be found`);
+
+      stream.respond({ [HTTP2_HEADER_STATUS]: HTTPStatusCode.NotFound });
+    }
+
   }
 
   private getFile(path: string) {
@@ -126,10 +165,10 @@ export class Http2FileServer implements IRequestHandler {
     const contentType = getContentType(path);
     const stat = fs.statSync(path);
     const headers = {
-      ':status': HTTPStatusCode.OK,
-      'content-length': stat.size,
-      'last-modified': stat.mtime.toUTCString(),
-      'content-type': contentType
+      // [HTTP2_HEADER_STATUS]: HTTPStatusCode.OK,
+      [HTTP2_HEADER_CONTENT_LENGTH]: stat.size,
+      [HTTP2_HEADER_LAST_MODIFIED]: stat.mtime.toUTCString(),
+      [HTTP2_HEADER_CONTENT_TYPE]: contentType
     };
     return { fd, headers };
   }
@@ -138,7 +177,7 @@ export class Http2FileServer implements IRequestHandler {
     const fs = this.fs;
     for (const item of fs.readdirSync(root)) {
       const path = join(root, item);
-      if (fs.isReadableSync(path)) {
+      if (!path.endsWith('index.html')) {
         if (fs.statSync(path).isFile()) {
           this.push(stream, path);
         } else {
@@ -147,13 +186,17 @@ export class Http2FileServer implements IRequestHandler {
       }
     }
   }
+
   private push(stream: ServerHttp2Stream, filePath: string) {
-    const { fd, headers } = this.getFile(filePath);
-    const pushHeaders = { [constants.HTTP2_HEADER_PATH]: filePath };
+    const { fd, headers } = this.getFile(resolve(this.root, filePath));
+    const pushHeaders = { [HTTP2_HEADER_PATH]: filePath };
 
     stream.pushStream(pushHeaders, (_err, pushStream) => {
+      // this.logger.info(`pushing ${filePath}`);
+      console.log(`pushing ${filePath}`);
       // TODO handle error
       pushStream.respondWithFD(fd, headers);
+      // pushStream.on('close', () => this.fs.closeSync(fd));
     });
   }
 }
