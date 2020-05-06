@@ -147,7 +147,6 @@ export interface IRequestHandler {
 
 export interface IHttp2FileServer {
   handleRequest(context: IHttpContext): void;
-  handleStream(stream: ServerHttp2Stream, headers: IncomingHttpHeaders, flags: number): void;
 }
 
 export const IFileSystem = DI.createInterface<IFileSystem>('IFileSystem').noDefault();

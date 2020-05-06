@@ -10,7 +10,37 @@ const {
   HTTP2_HEADER_PATH,
 } = constants;
 
-const root = join(process.cwd(), "public");
+// const root = join(process.cwd(), "public");
+const root = join(process.cwd(), "dist");
+
+/**
+ * @param {string} path
+ */
+function getFile(path) {
+  const fd = openSync(path, 'r');
+  const contentType = getContentType(path);
+  const stat = statSync(path);
+  const headers = {
+    [HTTP2_HEADER_CONTENT_LENGTH]: stat.size,
+    [HTTP2_HEADER_LAST_MODIFIED]: stat.mtime.toUTCString(),
+    [HTTP2_HEADER_CONTENT_TYPE]: contentType
+  };
+  return { fd, headers };
+}
+
+/** @type {Map<string, {fd: number, headers: Record<string, any>}>} */
+const fdMap = new Map();
+function prepare($root = root) {
+  for (const item of readdirSync($root)) {
+    const path = join($root, item);
+    const stats = statSync(path);
+    if (stats.isFile()) {
+      fdMap.set(path, getFile(path));
+    } else {
+      prepare(path);
+    }
+  }
+}
 
 /**
  * @param {string | string[]} path
@@ -35,18 +65,17 @@ function requestHandler(request, response) {
   console.log(`parsedPath: ${parsedPath}`);
   const path = join(root, parsedPath);
 
-  if (existsSync(path) && statSync(path).isFile()) {
+  const file = fdMap.get(path);
+  if (file) {
     console.log(`Serving file "${path}"`);
 
     const stream = response.stream;
     if (parsedPath === '/index.html') {
-      console.log('pushingAll')
+      console.log('pushingAll');
       pushAll(stream);
       // push(stream, "examples/vanilla-ts/src/startup.js")
     }
-
-    const { fd, headers } = getFile(path);
-    stream.respondWithFD(fd, headers);
+    stream.respondWithFD(file.fd, file.headers);
     // stream.on('end', () => { closeSync(fd); });
 
   } else {
@@ -57,39 +86,12 @@ function requestHandler(request, response) {
 }
 
 /**
- * @param {string} path
- */
-function getFile(path) {
-  const fd = openSync(path, 'r');
-  const contentType = getContentType(path);
-  const stat = statSync(path);
-  const headers = {
-    [HTTP2_HEADER_CONTENT_LENGTH]: stat.size,
-    [HTTP2_HEADER_LAST_MODIFIED]: stat.mtime.toUTCString(),
-    [HTTP2_HEADER_CONTENT_TYPE]: contentType
-  };
-  return { fd, headers };
-}
-
-
-/**
  * @param {import("http2").ServerHttp2Stream} stream
- * @param {string} [$root=root]
  */
-function pushAll(stream, $root = root) {
-  // console.log('readdirSync', readdirSync($root));
-  for (const item of readdirSync($root)) {
-    const path = join($root, item);
-    const stats = statSync(path);
+function pushAll(stream) {
+  for (const [path, info] of fdMap) {
     if (!path.endsWith('index.html')) {
-      // console.log("1");
-      if (stats.isFile()) {
-        // console.log("2");
-        push(stream, path);
-      } else {
-        // console.log("3");
-        pushAll(stream, path);
-      }
+      push(stream, path, info);
     }
   }
 }
@@ -98,18 +100,20 @@ function pushAll(stream, $root = root) {
  * @param {import("http2").ServerHttp2Stream} stream
  * @param {string} filePath
  */
-function push(stream, filePath) {
-  const { fd, headers } = getFile(filePath);
-  const pushHeaders = { [HTTP2_HEADER_PATH]: relative(root, filePath) };
+function push(stream, filePath, { fd, headers }) {
+  filePath = `/${relative(root, filePath)}`;
+  const pushHeaders = { [HTTP2_HEADER_PATH]: filePath };
 
-  console.log(`preparing for pushing ${filePath}`);
+  // console.log(`preparing for pushing ${filePath}`);
   stream.pushStream(pushHeaders, (_err, pushStream) => {
-    console.log(`pushing ${filePath}`);
+    // console.log(`pushing ${filePath}`);
     pushStream.respondWithFD(fd, headers);
     // pushStream.on('end', () => { closeSync(fd); });
   });
 }
 
+prepare();
+// console.log(fdMap);
 const server = createSecureServer(
   {
     key: readFileSync("key.pem"),

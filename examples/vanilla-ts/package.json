@@ -8,6 +8,7 @@
   },
   "version": "0.3.0",
   "scripts": {
+    "start1": "node -r esm node_modules/au/dist/esnext/index.js dev --entryfile ./src/startup.ts --scratchdir ./dist/",
     "start": "node -r esm node_modules/au/dist/esnext/index.js dev --entryfile ./src/startup.ts --scratchdir ./dist/ --usehttp2 true --keypath ./key.pem --certpath ./cert.pem"
   },
   "dependencies": {

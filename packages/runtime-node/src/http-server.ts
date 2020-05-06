@@ -113,7 +113,6 @@ export class Http2Server implements IHttpServer {
       },
       this.handleRequest // Do we need this at all?
     ).listen(port, hostName);
-    // server.on('stream', this.handleStream);
     await new Promise(resolve => server!.on('listening', resolve));
 
     const { address, port: realPort } = server.address() as AddressInfo;
@@ -143,13 +142,4 @@ export class Http2Server implements IHttpServer {
       res.end();
     }
   }
-
-  // @bound
-  // private handleStream(stream: ServerHttp2Stream, headers: IncomingHttpHeaders, flags: number) {
-  //   stream.on('error', (err) => {
-  //     this.logger.error(err);
-  //   });
-  //   this.logger.info(`handling stream; push allowed: ${stream.pushAllowed}`);
-  //   this.http2FileServer.handleStream(stream, headers, flags);
-  // }
 }

@@ -1,4 +1,5 @@
 import { IncomingMessage, ServerResponse } from "http";
+import { ServerHttp2Stream, constants, Http2ServerRequest, Http2ServerResponse, OutgoingHttpHeaders } from 'http2';
 import * as url from 'url';
 import { join, resolve, relative } from 'path';
 
@@ -7,11 +8,9 @@ import { ILogger } from '@aurelia/kernel';
 import { IRequestHandler, IHttpServerOptions, IFileSystem, Encoding, IHttp2FileServer } from '../interfaces';
 import { IHttpContext, HttpContextState } from '../http-context';
 import { getContentType, HTTPStatusCode } from '../http-utils';
-import { ServerHttp2Stream, constants, IncomingHttpHeaders, Http2ServerRequest, Http2ServerResponse } from 'http2';
 
 const {
   HTTP2_HEADER_PATH,
-  HTTP2_HEADER_STATUS,
   HTTP2_HEADER_CONTENT_LENGTH,
   HTTP2_HEADER_LAST_MODIFIED,
   HTTP2_HEADER_CONTENT_TYPE,
@@ -76,7 +75,9 @@ export class FileServer implements IRequestHandler {
  * File server with HTTP/2 push support
  */
 export class Http2FileServer implements IHttp2FileServer {
+
   private readonly root: string;
+  private readonly filePushMap: Map<string, PushInfo> = new Map<string, PushInfo>();
 
   public constructor(
     @IHttpServerOptions
@@ -89,7 +90,7 @@ export class Http2FileServer implements IHttp2FileServer {
     this.logger = logger.root.scopeTo('FileServer');
 
     this.root = resolve(opts.root);
-
+    this.prepare();
     this.logger.debug(`Now serving files from: "${this.root}"`);
   }
 
@@ -102,22 +103,21 @@ export class Http2FileServer implements IHttp2FileServer {
     const parsedPath = parsedUrl.path!;
     const path = join(this.root, parsedPath);
 
-    if (this.fs.isReadableSync(path)) {
+    const file = this.filePushMap.get(parsedPath);
+
+    if (file !== void 0) {
       this.logger.debug(`Serving file "${path}"`);
 
       const stream = response.stream;
-      // make this configurable
+      // TODO make this configurable
       if (parsedPath === '/index.html') {
         this.pushAll(stream);
       }
 
-      const { fd, headers } = this.getFile(path);
-      // stream.on('close', () => this.fs.closeSync(fd));
-      stream.respondWithFD(fd, headers);
+      stream.respondWithFD(file.fd, file.headers);
 
     } else {
       this.logger.debug(`File "${path}" could not be found`);
-
       response.writeHead(HTTPStatusCode.NotFound);
       response.end();
     }
@@ -125,78 +125,53 @@ export class Http2FileServer implements IHttp2FileServer {
     context.state = HttpContextState.end;
   }
 
-  public handleStream(stream: ServerHttp2Stream, headers: IncomingHttpHeaders, flags: number): void {
-    this.logger.info('Http2FileServer#handleRequest');
-
-    const parsedUrl = url.parse(headers[HTTP2_HEADER_PATH] as string);
-    const parsedPath = parsedUrl.path!;
-    const path = join(this.root, parsedPath);
-
-    if (this.fs.isReadableSync(path)) {
-      this.logger.debug(`Serving file "${path}"`);
-
-      // make this configurable
-      if (parsedPath === '/index.html') {
-        // this.pushAll(stream);
-        // TODO fix this
-        this.push(stream, '/examples/vanilla-ts/src/startup.js');
-        this.push(stream, '/examples/vanilla-ts/src/app.js');
-      }
-
-      const fileInfo = this.getFile(path);
-      const fd = fileInfo.fd;
-      stream.respondWithFD(fd, fileInfo.headers);
-      // stream.on('close', () => this.fs.closeSync(fd));
-      // stream.respondWithFile(path);
-      // stream.respond(fileInfo.headers);
-      // stream.write(this.fs.readFileSync(path, Encoding.utf8));
-
-    } else {
-      this.logger.debug(`File "${path}" could not be found`);
-
-      stream.respond({ [HTTP2_HEADER_STATUS]: HTTPStatusCode.NotFound });
-    }
-
-  }
-
   private getFile(path: string) {
     const fs = this.fs;
-    const fd = fs.openSync(path, 'r');
-    const contentType = getContentType(path);
     const stat = fs.statSync(path);
-    const headers = {
-      // [HTTP2_HEADER_STATUS]: HTTPStatusCode.OK,
-      [HTTP2_HEADER_CONTENT_LENGTH]: stat.size,
-      [HTTP2_HEADER_LAST_MODIFIED]: stat.mtime.toUTCString(),
-      [HTTP2_HEADER_CONTENT_TYPE]: contentType
-    };
-    return { fd, headers };
+    return new PushInfo(
+      fs.openSync(path, 'r'),
+      {
+        [HTTP2_HEADER_CONTENT_LENGTH]: stat.size,
+        [HTTP2_HEADER_LAST_MODIFIED]: stat.mtime.toUTCString(),
+        [HTTP2_HEADER_CONTENT_TYPE]: getContentType(path)
+      }
+    );
   }
 
-  private pushAll(stream: ServerHttp2Stream, root = this.root) {
-    const fs = this.fs;
-    for (const item of fs.readdirSync(root)) {
-      const path = join(root, item);
+  private pushAll(stream: ServerHttp2Stream) {
+    for (const [path, info] of this.filePushMap) {
       if (!path.endsWith('index.html')) {
-        if (fs.statSync(path).isFile()) {
-          this.push(stream, path);
-        } else {
-          this.pushAll(stream, path);
-        }
+        this.push(stream, path, info);
       }
     }
   }
 
-  private push(stream: ServerHttp2Stream, filePath: string) {
-    const { fd, headers } = this.getFile(resolve(this.root, filePath));
+  private push(stream: ServerHttp2Stream, filePath: string, { fd, headers }: PushInfo) {
     const pushHeaders = { [HTTP2_HEADER_PATH]: filePath };
 
     stream.pushStream(pushHeaders, (_err, pushStream) => {
-      // this.logger.info(`pushing ${filePath}`);
-      console.log(`pushing ${filePath}`);
       // TODO handle error
+      this.logger.debug(`pushing ${filePath}`);
       pushStream.respondWithFD(fd, headers);
-      // pushStream.on('close', () => this.fs.closeSync(fd));
     });
   }
+
+  private prepare(root = this.opts.root) {
+    for (const item of this.fs.readdirSync(root)) {
+      const path = join(root, item);
+      const stats = this.fs.statSync(path);
+      if (stats.isFile()) {
+        this.filePushMap.set(`/${relative(this.root, path)}`, this.getFile(path));
+      } else {
+        this.prepare(path);
+      }
+    }
+  }
+}
+
+class PushInfo {
+  public constructor(
+    public fd: number,
+    public headers: OutgoingHttpHeaders,
+  ) { }
 }
